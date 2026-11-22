@@ -257,6 +257,12 @@ def main():
         return
 
     state = load_state()
+    if "--test-latest" in sys.argv:  # テスト：最新投稿を日付関係なく1件通知（記録はしない）
+        posts = fetch_posts()
+        latest = max(posts, key=lambda p: int(p["id"]))
+        log(f"取得 {len(posts)}件 / テストで最新投稿を通知します")
+        notify(latest)
+        return
     if "--once" in sys.argv:  # GitHub Actions用：1回チェックして終了
         posts, new = check_once(state)
         log(f"取得 {len(posts)}件 / 新着通知 {len(new)}件")
