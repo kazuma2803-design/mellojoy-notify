@@ -29,8 +29,8 @@ TIKTOK_ACCOUNT = "mellojoyjapan"
 WATCH_START = (9, 45)            # この時刻〜WATCH_END は短い間隔でチェック
 WATCH_END = (12, 30)
 INTERVAL_IN_WINDOW = 90          # 秒（時間帯内）
-INTERVAL_OUTSIDE = 30 * 60
-LOOP_INTERVAL = 60               # GitHub上の朝の見張りでのチェック間隔（秒）       # 秒（時間帯外。それ以外の投稿も一応拾う）
+INTERVAL_OUTSIDE = 30 * 60       # 秒（時間帯外。それ以外の投稿も一応拾う）
+LOOP_INTERVAL = 60               # GitHub上の朝の見張りでのチェック間隔（秒）
 STOP_AFTER_FOUND = False         # True: その日1件通知したら翌日までは時間帯外の間隔に落とす
 # ==============================
 
@@ -83,8 +83,9 @@ def post_url(vid):
 def fetch_ytdlp():
     import yt_dlp
     opts = {"quiet": True, "no_warnings": True, "extract_flat": True,
-            "playlistend": 12, "skip_download": True,
-            "http_headers": {"User-Agent": UA}}
+            "playlistend": 16, "skip_download": True,
+            "geo_bypass_country": "JP",
+            "http_headers": {"User-Agent": UA, "Accept-Language": "ja-JP,ja;q=0.9"}}
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(PROFILE_URL, download=False)
     posts = []
@@ -125,9 +126,13 @@ def fetch_playwright():
                 pass
 
     with sync_playwright() as p:
-        ctx = p.chromium.launch_persistent_context(
-            os.path.join(BASE_DIR, "tiktok_profile"), channel="chrome",
-            headless=True, user_agent=UA, locale="ja-JP")
+        opts = dict(headless=True, user_agent=UA, locale="ja-JP", timezone_id="Asia/Tokyo")
+        try:
+            ctx = p.chromium.launch_persistent_context(
+                os.path.join(BASE_DIR, "tiktok_profile"), channel="chrome", **opts)
+        except Exception:
+            ctx = p.chromium.launch_persistent_context(
+                os.path.join(BASE_DIR, "tiktok_profile"), **opts)
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         page.on("response", on_response)
         page.goto(PROFILE_URL, wait_until="domcontentloaded", timeout=60000)
@@ -152,19 +157,41 @@ def fetch_playwright():
     return posts
 
 
+LAST_ROUTE_INFO = ""
+
+
 def fetch_posts():
-    errors = []
+    """yt-dlp と Playwright の両方で取って合体（どちらかにしか出ない投稿も拾う）"""
+    global LAST_ROUTE_INFO
+    merged, info, errors = {}, [], []
     for name, fn in (("yt-dlp", fetch_ytdlp), ("playwright", fetch_playwright)):
         try:
             posts = fn()
-            if posts:
-                return posts
-            errors.append(f"{name}: 0件")
+            info.append(f"{name}:{len(posts)}")
+            for p in posts:
+                old = merged.get(p["id"])
+                if not old:
+                    merged[p["id"]] = p
+                else:  # 説明文やサムネが空の方を埋める
+                    old["desc"] = old.get("desc") or p.get("desc", "")
+                    old["cover"] = old.get("cover") or p.get("cover", "")
         except ImportError:
             errors.append(f"{name}: 未インストール")
         except Exception as e:
             errors.append(f"{name}: {type(e).__name__}: {str(e)[:150]}")
-    raise RuntimeError(" / ".join(errors))
+    LAST_ROUTE_INFO = " ".join(info + [f"[{e}]" for e in errors])
+    if not merged:
+        raise RuntimeError(" / ".join(errors) or "0件")
+    return list(merged.values())
+
+
+def newest_summary(posts, n=3):
+    """ログ用：新しい順に n 件（固定投稿は除いた日付順）"""
+    out = []
+    for p in sorted(posts, key=lambda p: int(p["id"]), reverse=True)[:n]:
+        t = created_at(p["id"])
+        out.append(f"{t:%m/%d %H:%M}" if t else p["id"])
+    return ", ".join(out)
 
 
 # ---------- Discord ----------
@@ -292,7 +319,8 @@ def main():
                     continue
                 try:
                     posts, new = check_once(state)
-                    print(f"  {now:%H:%M:%S} 取得{len(posts)}件 新着{len(new)}件", flush=True)
+                    print(f"  {now:%H:%M:%S} 取得{len(posts)}件 新着{len(new)}件 "
+                          f"({LAST_ROUTE_INFO}) 最新: {newest_summary(posts)}", flush=True)
                 except Exception as e:
                     log(f"取得失敗: {e}")
                 time.sleep(LOOP_INTERVAL)
@@ -300,7 +328,7 @@ def main():
             return
     if "--once" in sys.argv:  # 1回チェックして終了
         posts, new = check_once(state)
-        log(f"取得 {len(posts)}件 / 新着通知 {len(new)}件")
+        log(f"取得 {len(posts)}件 / 新着通知 {len(new)}件 ({LAST_ROUTE_INFO})")
         for p in sorted(posts, key=lambda p: int(p["id"]), reverse=True)[:5]:
             t = created_at(p["id"])
             log(f"  最新: {t:%m/%d %H:%M} {p['id']} {p['desc'][:30]!r}")

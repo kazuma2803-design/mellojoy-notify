@@ -35,6 +35,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -U yt-dlp playwright
+      # PCのChromeが無い環境用の予備ブラウザ（失敗しても続行）
+      - run: python -m playwright install chromium || true
       - name: Check TikTok
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
