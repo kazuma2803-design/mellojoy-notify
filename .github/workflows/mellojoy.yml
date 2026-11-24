@@ -40,9 +40,10 @@ jobs:
       - name: Check TikTok
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          PW_HEADLESS: "0"
         run: |
           if [ "${{ inputs.test }}" = "true" ]; then
-            python mellojoy_tiktok_notify.py --test-latest
+            xvfb-run -a python mellojoy_tiktok_notify.py --test-latest
           else
-            python mellojoy_tiktok_notify.py --auto
+            xvfb-run -a python mellojoy_tiktok_notify.py --auto
           fi

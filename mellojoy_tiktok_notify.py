@@ -113,10 +113,12 @@ def detail_ytdlp(vid):
         return {}
 
 
-# ---------- 取得ルート2: Playwright（PCのChrome） ----------
+# ---------- 取得ルート2: Playwright（本物のブラウザで開く） ----------
 def fetch_playwright():
     from playwright.sync_api import sync_playwright
     items, posts = [], []
+    # GitHub上では xvfb（仮想画面）で画面ありモードにする（headlessだとTikTokに弾かれやすい）
+    headless = os.environ.get("PW_HEADLESS", "1") != "0"
 
     def on_response(r):
         if "/api/post/item_list" in r.url:
@@ -126,7 +128,9 @@ def fetch_playwright():
                 pass
 
     with sync_playwright() as p:
-        opts = dict(headless=True, user_agent=UA, locale="ja-JP", timezone_id="Asia/Tokyo")
+        opts = dict(headless=headless, user_agent=UA, locale="ja-JP", timezone_id="Asia/Tokyo",
+                    viewport={"width": 1280, "height": 900},
+                    args=["--disable-blink-features=AutomationControlled"])
         try:
             ctx = p.chromium.launch_persistent_context(
                 os.path.join(BASE_DIR, "tiktok_profile"), channel="chrome", **opts)
@@ -135,8 +139,11 @@ def fetch_playwright():
                 os.path.join(BASE_DIR, "tiktok_profile"), **opts)
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         page.on("response", on_response)
-        page.goto(PROFILE_URL, wait_until="domcontentloaded", timeout=60000)
-        page.wait_for_timeout(8000)
+        resp = page.goto(PROFILE_URL, wait_until="domcontentloaded", timeout=60000)
+        for _ in range(20):  # 投稿一覧APIが返るまで最大20秒待つ
+            if items:
+                break
+            page.wait_for_timeout(1000)
         if not items:  # APIが拾えなければ画面のリンクから
             hrefs = page.eval_on_selector_all(
                 "a[href*='/video/'], a[href*='/photo/']", "els => els.map(e => e.href)")
@@ -144,6 +151,8 @@ def fetch_playwright():
                 m = re.search(r"/(?:video|photo)/(\d+)", h)
                 if m and m.group(1) not in [x["id"] for x in posts]:
                     posts.append({"id": m.group(1), "desc": "", "cover": ""})
+            if not posts:
+                log(f"playwright: 0件（HTTP {resp.status if resp else '?'} / title={page.title()!r}）")
         ctx.close()
 
     for it in items:
