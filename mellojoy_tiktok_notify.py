@@ -176,7 +176,11 @@ def fetch_posts():
     """yt-dlp と Playwright の両方で取って合体（どちらかにしか出ない投稿も拾う）"""
     global LAST_ROUTE_INFO
     merged, info, errors = {}, [], []
-    for name, fn in (("yt-dlp", fetch_ytdlp), ("playwright", fetch_playwright)):
+    routes = [("yt-dlp", fetch_ytdlp)]
+    # GitHubのサーバーからだとTikTokが空の一覧しか返さないので、PW_DISABLE=1 のときは使わない
+    if os.environ.get("PW_DISABLE") != "1":
+        routes.append(("playwright", fetch_playwright))
+    for name, fn in routes:
         try:
             posts = fn()
             info.append(f"{name}:{len(posts)}")

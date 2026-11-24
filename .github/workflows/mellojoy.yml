@@ -34,16 +34,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -U yt-dlp playwright
-      # PCのChromeが無い環境用の予備ブラウザ（失敗しても続行）
-      - run: python -m playwright install chromium || true
+      - run: pip install -U yt-dlp
       - name: Check TikTok
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          PW_HEADLESS: "0"
+          # GitHubからだとTikTokがブラウザ方式に空の一覧しか返さないのでオフ
+          PW_DISABLE: "1"
         run: |
           if [ "${{ inputs.test }}" = "true" ]; then
-            xvfb-run -a python mellojoy_tiktok_notify.py --test-latest
+            python mellojoy_tiktok_notify.py --test-latest
           else
-            xvfb-run -a python mellojoy_tiktok_notify.py --auto
+            python mellojoy_tiktok_notify.py --auto
           fi
