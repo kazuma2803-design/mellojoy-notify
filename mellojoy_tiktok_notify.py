@@ -116,16 +116,18 @@ def detail_ytdlp(vid):
 # ---------- 取得ルート2: Playwright（本物のブラウザで開く） ----------
 def fetch_playwright():
     from playwright.sync_api import sync_playwright
-    items, posts = [], []
+    items, posts, seen_api = [], [], []
     # GitHub上では xvfb（仮想画面）で画面ありモードにする（headlessだとTikTokに弾かれやすい）
     headless = os.environ.get("PW_HEADLESS", "1") != "0"
 
     def on_response(r):
         if "/api/post/item_list" in r.url:
             try:
-                items.extend(r.json().get("itemList") or [])
-            except Exception:
-                pass
+                body = r.body()
+                seen_api.append(f"{r.status}/{len(body)}B")
+                items.extend(json.loads(body).get("itemList") or [])
+            except Exception as e:
+                seen_api.append(f"{r.status}/{type(e).__name__}")
 
     with sync_playwright() as p:
         opts = dict(headless=headless, user_agent=UA, locale="ja-JP", timezone_id="Asia/Tokyo",
@@ -152,7 +154,8 @@ def fetch_playwright():
                 if m and m.group(1) not in [x["id"] for x in posts]:
                     posts.append({"id": m.group(1), "desc": "", "cover": ""})
             if not posts:
-                log(f"playwright: 0件（HTTP {resp.status if resp else '?'} / title={page.title()!r}）")
+                txt = page.evaluate("document.body.innerText.slice(0,200)").replace("\n", " ")
+                log(f"playwright: 0件（HTTP {resp.status if resp else '?'} / API応答={seen_api} / 画面={txt!r}）")
         ctx.close()
 
     for it in items:
